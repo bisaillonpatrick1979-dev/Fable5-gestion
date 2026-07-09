@@ -4,7 +4,7 @@
 // n'importe quelle instance Express sans dupliquer la logique.
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { supabase, supabaseEnabled, resolveCompanyId, resolveEmployeeRole, TABLES_WITH_COMPANY_ID, TABLE_ID_COLUMN } from './db';
+import { supabase, supabaseEnabled, resolveCompanyId, resolveEmployeeRole, resolveCompanyAiSettings, TABLES_WITH_COMPANY_ID, TABLE_ID_COLUMN } from './db';
 
 // Toutes les tables exposées par la couche de données générique (voir supabase_migration.sql)
 const KNOWN_TABLES = [
@@ -193,6 +193,27 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const VISION_CAPABLE_PROVIDERS = new Set(['gemini', 'anthropic', 'openai']);
 
+// Résout le fournisseur et la clé API réellement utilisables pour une requête IA.
+// Priorité : ce que le navigateur envoie (clé fraîchement saisie) > réglages
+// enregistrés dans la table companies > variables d'environnement du serveur.
+// Tout est trimé : une clé collée avec espace ou retour de ligne invisible rend
+// l'en-tête HTTP invalide et faisait échouer chaque appel au fournisseur.
+async function resolveAiCredentials(clientProvider?: string, clientApiKey?: string): Promise<{ provider: string; apiKey: string }> {
+  const dbSettings = supabaseEnabled
+    ? await resolveCompanyAiSettings().catch(() => ({ provider: null, apiKey: null }))
+    : { provider: null, apiKey: null };
+
+  let provider = 'gemini';
+  if (clientProvider && PROVIDER_ENV_KEYS[clientProvider]) provider = clientProvider;
+  else if (dbSettings.provider && PROVIDER_ENV_KEYS[dbSettings.provider]) provider = dbSettings.provider;
+
+  const apiKey = (clientApiKey || '').trim()
+    || (dbSettings.apiKey || '').trim()
+    || (process.env[PROVIDER_ENV_KEYS[provider]] || '').trim();
+
+  return { provider, apiKey };
+}
+
 async function callProvider(selectedProvider: string, message: string, apiKey: string, systemInstruction: string, image?: ImageInput): Promise<string> {
   if (selectedProvider === 'anthropic') return callAnthropic(message, apiKey, systemInstruction, image);
   if (selectedProvider === 'openai') return callOpenAI(message, apiKey, systemInstruction, image);
@@ -231,14 +252,12 @@ export function registerApiRoutes(app: express.Express): void {
         }
       }
 
-      const selectedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'gemini';
-      const envKey = process.env[PROVIDER_ENV_KEYS[selectedProvider]];
-      const apiKey = (clientApiKey && clientApiKey.trim()) || envKey;
+      const { provider: selectedProvider, apiKey } = await resolveAiCredentials(provider, clientApiKey);
       const systemInstruction = effectiveMode === 'accountant'
         ? buildAccountantSystemInstruction(regionLabel, companyName)
         : buildEngineerSystemInstruction(regionLabel, country === 'US' ? 'US' : 'CA');
 
-      if (!apiKey || apiKey.trim() === '') {
+      if (!apiKey) {
         return res.json({
           reply: `🤖 L'assistant IA fonctionne en mode simulation locale car aucune clé API n'est configurée pour ${PROVIDER_LABELS[selectedProvider]}. Ajoutez votre clé API dans Réglages > Assistant IA pour l'activer.`,
           simulated: true,
@@ -247,10 +266,28 @@ export function registerApiRoutes(app: express.Express): void {
       }
 
       const text = await callProvider(selectedProvider, message, apiKey, systemInstruction);
-      return res.json({ reply: text, mode: effectiveMode });
+      return res.json({ reply: text, mode: effectiveMode, provider: selectedProvider });
     } catch (error: any) {
       console.error('Error on /api/chat:', error);
       return res.status(500).json({ error: error.message || 'Error occurred while calling the AI provider' });
+    }
+  });
+
+  // Test de connexion au fournisseur IA depuis Réglages > Assistant IA : fait un
+  // vrai aller-retour minimal et renvoie l'erreur exacte du fournisseur en cas
+  // d'échec (clé invalide, quota, modèle...), au lieu de laisser l'utilisateur
+  // deviner pourquoi "l'IA ne marche pas".
+  app.post('/api/ai/test', async (req, res) => {
+    try {
+      const { provider, apiKey: clientApiKey } = req.body;
+      const { provider: selectedProvider, apiKey } = await resolveAiCredentials(provider, clientApiKey);
+      if (!apiKey) {
+        return res.status(400).json({ ok: false, provider: selectedProvider, error: `Aucune clé API disponible pour ${PROVIDER_LABELS[selectedProvider]}.` });
+      }
+      await callProvider(selectedProvider, 'Réponds uniquement "OK".', apiKey, 'Tu es un test de connexion. Réponds "OK".');
+      return res.json({ ok: true, provider: selectedProvider, label: PROVIDER_LABELS[selectedProvider] });
+    } catch (error: any) {
+      return res.status(502).json({ ok: false, error: error.message || 'Échec de connexion au fournisseur IA' });
     }
   });
 
@@ -268,13 +305,11 @@ export function registerApiRoutes(app: express.Express): void {
         return res.status(400).json({ error: 'Image manquante' });
       }
 
-      const selectedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'gemini';
+      const { provider: selectedProvider, apiKey } = await resolveAiCredentials(provider, clientApiKey);
       if (!VISION_CAPABLE_PROVIDERS.has(selectedProvider)) {
         return res.status(400).json({ error: `${PROVIDER_LABELS[selectedProvider]} ne supporte pas l'analyse de photo. Choisissez Gemini, Anthropic ou OpenAI pour scanner une facture.` });
       }
-      const envKey = process.env[PROVIDER_ENV_KEYS[selectedProvider]];
-      const apiKey = (clientApiKey && clientApiKey.trim()) || envKey;
-      if (!apiKey || apiKey.trim() === '') {
+      if (!apiKey) {
         return res.status(400).json({ error: 'Aucune clé API configurée pour scanner une facture.' });
       }
 

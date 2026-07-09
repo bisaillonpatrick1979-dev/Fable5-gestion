@@ -55,6 +55,20 @@ export async function resolveCompanyId(): Promise<string> {
   return cachedCompanyId;
 }
 
+// Réglages IA de l'entreprise (fournisseur + clé API) lus depuis la base :
+// sert de repli quand le navigateur n'envoie pas la clé (autre appareil,
+// LocalStorage vidé, etc.). Mono-tenant : première ligne de "companies".
+export async function resolveCompanyAiSettings(): Promise<{ provider: string | null; apiKey: string | null }> {
+  if (!supabase) return { provider: null, apiKey: null };
+  const { data, error } = await supabase
+    .from('companies')
+    .select('ai_provider, ai_api_key')
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return { provider: null, apiKey: null };
+  return { provider: (data.ai_provider as string) || null, apiKey: (data.ai_api_key as string) || null };
+}
+
 // Vérifie le rôle réel d'un employé depuis la base plutôt que de faire confiance
 // à un rôle fourni par le client, pour empêcher un employé d'usurper l'accès
 // admin/comptable simplement en modifiant la requête envoyée au serveur.

@@ -320,6 +320,13 @@ export default function App() {
   const [aiKeyDraft, setAiKeyDraft] = useState<string>(companyInfo.aiApiKey || '');
   const [showAiKey, setShowAiKey] = useState<boolean>(false);
   const [receiptScanning, setReceiptScanning] = useState<boolean>(false);
+  const [aiTestStatus, setAiTestStatus] = useState<{ state: 'idle' | 'testing' | 'ok' | 'error'; message?: string }>({ state: 'idle' });
+
+  // Reflète dans le champ la clé restaurée par la synchro cloud (hydrateCloud
+  // peut arriver après le premier rendu, le useState initial serait vide).
+  useEffect(() => {
+    setAiKeyDraft(prev => prev || companyInfo.aiApiKey || '');
+  }, [companyInfo.aiApiKey]);
 
   // Empêche de rester sur l'IA Comptable si l'employé actif n'y a pas droit
   // (ex: déconnexion/changement d'utilisateur vers un rôle "employee").
@@ -606,6 +613,40 @@ export default function App() {
       }]);
     } finally {
       setIsAiLoading(false);
+    }
+  };
+
+  // Enregistre la clé API IA en la nettoyant (un espace ou retour de ligne collé
+  // avec la clé rend l'en-tête HTTP invalide et fait échouer tous les appels).
+  const handleSaveAiKey = () => {
+    const cleaned = aiKeyDraft.trim();
+    setAiKeyDraft(cleaned);
+    updateCompanyInfo({ aiApiKey: cleaned });
+    setAiTestStatus({ state: 'idle' });
+    alert(cleaned ? 'Clé API enregistrée !' : 'Clé API effacée.');
+  };
+
+  // Vérifie la connexion au fournisseur IA par un vrai aller-retour et affiche
+  // l'erreur exacte du fournisseur (clé invalide, quota...) en cas d'échec.
+  const handleTestAiConnection = async () => {
+    setAiTestStatus({ state: 'testing' });
+    try {
+      const res = await fetch('/api/ai/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: companyInfo.aiProvider || 'gemini',
+          apiKey: (aiKeyDraft || companyInfo.aiApiKey || '').trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setAiTestStatus({ state: 'ok', message: `Connexion réussie avec ${data.label} !` });
+      } else {
+        setAiTestStatus({ state: 'error', message: data.error || 'Échec de connexion au fournisseur IA.' });
+      }
+    } catch {
+      setAiTestStatus({ state: 'error', message: 'Erreur réseau pendant le test de connexion.' });
     }
   };
 
@@ -5754,7 +5795,7 @@ export default function App() {
                         <div>
                           <h4 className="text-xs font-black uppercase text-orange-500">🤖 Assistant IA</h4>
                           <p className="text-[10px] text-gray-400 mt-0.5">
-                            Choisissez le fournisseur d'intelligence artificielle et entrez votre propre clé API. Elle est enregistrée uniquement dans ce navigateur (LocalStorage) et sert uniquement à connecter l'assistant.
+                            Choisissez le fournisseur d'intelligence artificielle et entrez votre propre clé API. Elle est enregistrée dans ce navigateur et synchronisée avec votre base de données sécurisée, pour que l'assistant fonctionne depuis tous vos appareils.
                           </p>
                         </div>
 
@@ -5791,6 +5832,7 @@ export default function App() {
                               className="flex-1 p-2 bg-gray-950 font-mono text-white text-xs rounded-lg border border-gray-850"
                               value={aiKeyDraft}
                               onChange={(e) => setAiKeyDraft(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleSaveAiKey()}
                             />
                             <button
                               onClick={() => setShowAiKey(!showAiKey)}
@@ -5800,15 +5842,27 @@ export default function App() {
                               {showAiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                           </div>
-                          <button
-                            onClick={() => {
-                              updateCompanyInfo({ aiApiKey: aiKeyDraft });
-                              alert('Clé API enregistrée !');
-                            }}
-                            className="w-full py-2 bg-orange-600 hover:bg-orange-500 text-white font-black text-xs rounded-xl transition cursor-pointer"
-                          >
-                            Enregistrer la clé
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleSaveAiKey}
+                              className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 text-white font-black text-xs rounded-xl transition cursor-pointer"
+                            >
+                              Enregistrer la clé
+                            </button>
+                            <button
+                              onClick={handleTestAiConnection}
+                              disabled={aiTestStatus.state === 'testing'}
+                              className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-white font-black text-xs rounded-xl transition cursor-pointer disabled:opacity-50"
+                            >
+                              {aiTestStatus.state === 'testing' ? 'Test en cours...' : '🔌 Tester la connexion'}
+                            </button>
+                          </div>
+                          {aiTestStatus.state === 'ok' && (
+                            <p className="text-[10px] text-green-400 font-bold">✅ {aiTestStatus.message}</p>
+                          )}
+                          {aiTestStatus.state === 'error' && (
+                            <p className="text-[10px] text-red-400 font-bold">❌ {aiTestStatus.message}</p>
+                          )}
                           <p className="text-[10px] text-gray-500">
                             {companyInfo.aiApiKey
                               ? `Clé actuellement enregistrée pour ${AI_PROVIDER_LABELS_FR[companyInfo.aiProvider || 'gemini']} (••••${companyInfo.aiApiKey.slice(-4)}).`

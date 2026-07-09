@@ -1865,7 +1865,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         motivationGoals: mergeByKey(state.motivationGoals, motivationGoals, g => g.id),
         weeklyGoals: mergeByKey(state.weeklyGoals, weeklyGoals, w => w.employeeId)
       };
-      if (companyRow) next.companyInfo = { ...state.companyInfo, ...rowToCompanyInfo(companyRow) };
+      if (companyRow) {
+        // rowToCompanyInfo renvoie explicitement `undefined` pour chaque colonne
+        // vide en base. Les épandre tels quels écraserait les valeurs locales
+        // (dont la clé API IA fraîchement saisie) avec du vide à chaque
+        // rechargement — on ne garde donc que les champs réellement renseignés.
+        const cloudInfo: Record<string, any> = { ...rowToCompanyInfo(companyRow) };
+        Object.keys(cloudInfo).forEach(k => { if (cloudInfo[k] === undefined) delete cloudInfo[k]; });
+        const bd = cloudInfo.bankDetails;
+        if (bd && !bd.bank && !bd.transit && !bd.institution && !bd.account) delete cloudInfo.bankDetails;
+        next.companyInfo = { ...state.companyInfo, ...cloudInfo };
+      }
       return next as AppState;
     });
 
@@ -1887,6 +1897,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     saveState('gcp_motivationGoals', s.motivationGoals);
     saveState('gcp_weeklyGoals', s.weeklyGoals);
     saveState('gcp_companyInfo', s.companyInfo);
+
+    // Répare la base si la clé API IA a été enregistrée localement avant que la
+    // synchro cloud soit prête (updateCompanyInfo ne pouvait alors pas la pousser,
+    // faute de companyId résolu) : on la synchronise maintenant.
+    if (result.companyId && companyRow && !companyRow.ai_api_key && s.companyInfo.aiApiKey) {
+      syncUpdate('companies', result.companyId, companyInfoToRow(s.companyInfo));
+    }
   }
 }));
 export default useAppStore;
