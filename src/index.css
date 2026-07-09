@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/* Lisibilite globale : le barème de tailles nommées de Tailwind est en rem,
+   donc relever ce barème agrandit chaque usage de text-xs a text-3xl dans
+   toute l'application. */
+@theme {
+  --text-xs: 0.875rem;
+  --text-xs--line-height: calc(1.25 / 0.875);
+  --text-sm: 1rem;
+  --text-sm--line-height: calc(1.5 / 1);
+  --text-base: 1.125rem;
+  --text-base--line-height: calc(1.75 / 1.125);
+  --text-lg: 1.25rem;
+  --text-lg--line-height: calc(1.75 / 1.25);
+  --text-xl: 1.375rem;
+  --text-xl--line-height: calc(1.75 / 1.375);
+  --text-2xl: 1.625rem;
+  --text-2xl--line-height: calc(2 / 1.625);
+  --text-3xl: 2rem;
+  --text-3xl--line-height: calc(2.25 / 2);
+}
+
+/* L'application fixe aussi de nombreuses tailles arbitraires sous 12px
+   (text-[8px] a text-[12px]) qui contournent le barème ci-dessus. On les
+   relève individuellement a une taille lisible. Regles separees + !important
+   pour eviter que l'optimiseur CSS ne fusionne/elague ces overrides. */
+.text-\[8px\] {
+  font-size: 13px !important;
+}
+.text-\[8\.5px\] {
+  font-size: 13px !important;
+}
+.text-\[9px\] {
+  font-size: 13px !important;
+}
+.text-\[9\.5px\] {
+  font-size: 13.5px !important;
+}
+.text-\[10px\] {
+  font-size: 14px !important;
+}
+.text-\[10\.5px\] {
+  font-size: 14px !important;
+}
+.text-\[11px\] {
+  font-size: 15px !important;
+}
+.text-\[12px\] {
+  font-size: 16px !important;
+}

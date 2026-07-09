@@ -1,0 +1,6 @@
+{
+  "name": "Gestion Chantier Pro",
+  "description": "Application mobile-first de gestion de chantier pour Votre Entreprise - Punches, projets, géofencing, inventaire et IA.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
