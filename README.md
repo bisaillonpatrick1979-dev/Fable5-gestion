@@ -1,20 +1,35 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Fable5 Gestion
 
-# Run and deploy your AI Studio app
+Application mobile-first de gestion de chantier (punches, projets, géofencing, inventaire,
+paie, facturation) avec deux assistants IA intégrés :
 
-This contains everything you need to run your app locally.
+- **IA Ingénieur** — code du bâtiment et sécurité de chantier, adapté à la province/l'état de
+  l'entreprise (CNB/codes provinciaux au Canada, IBC/IRC aux États-Unis). Accessible à tous les
+  employés.
+- **IA Gestionnaire (Comptable/Secrétaire)** — comptabilité, gestion de matériel/inventaire,
+  gestion des payes et administration de l'application. Accessible uniquement à l'administration
+  (rôle revérifié côté serveur).
 
-View your app in AI Studio: https://ai.studio/apps/148abb89-fbf1-4a9d-9841-7febcada62c2
+Fournisseurs IA supportés au choix (configurables dans **Réglages > Assistant IA**, ou via clé
+serveur par défaut) : Anthropic Claude, Google Gemini, OpenAI et DeepSeek.
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js 20+
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Copy `.env.example` vers `.env` et remplissez au minimum :
+   - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` pour partager les données entre appareils
+     (sinon l'application fonctionne en mode LocalStorage local uniquement).
+   - `ANTHROPIC_API_KEY` (ou une autre clé de fournisseur IA) comme repli serveur si le
+     propriétaire n'a pas encore entré sa propre clé dans Réglages > Assistant IA.
 3. Run the app:
    `npm run dev`
+
+## Déploiement
+
+- `npm run build` produit le front (Vite) dans `dist/` et bundle `server.ts` en
+  `dist/server.cjs` pour un hébergement Node persistant (`npm start`).
+- Sur Vercel, `api/index.ts` sert les mêmes routes (`apiRoutes.ts`) en fonction serverless —
+  voir `vercel.json`.

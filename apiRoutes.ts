@@ -14,10 +14,27 @@ const KNOWN_TABLES = [
   'production_entries', 'weekly_goals', 'motivation_teams', 'motivation_goals', 'hr_alerts', 'expenses'
 ];
 
-// Rôles autorisés à parler à l'IA Comptable/Secrétaire (accès aux chiffres de la compagnie).
+// Rôles autorisés à parler à l'IA Comptable/Secrétaire (accès aux chiffres de la compagnie,
+// à la gestion de matériel/inventaire et à la gestion des payes).
 // Tous les autres rôles (ex: 'employee') sont limités à l'IA Ingénieur, qui n'a
 // accès à aucune donnée financière ou interne de l'entreprise.
 const FINANCIAL_ACCESS_ROLES = new Set(['admin', 'accountant', 'secretary']);
+
+// Détermine le rôle réel d'un employé pour la vérification d'accès à l'IA Comptable/Secrétaire.
+// - Si Supabase est configuré (déploiement multi-appareils), le rôle est TOUJOURS revérifié
+//   côté serveur via la table app_users, sans jamais faire confiance au client.
+// - Si Supabase n'est PAS configuré, l'application tourne entièrement en LocalStorage sur
+//   l'appareil de l'utilisateur : il n'existe alors aucune base serveur faisant autorité à
+//   protéger (l'employé actif vient déjà de sélectionner son propre profil sur cet appareil),
+//   donc on retombe sur le rôle déclaré par le client plutôt que de bloquer inconditionnellement
+//   l'IA gestionnaire pour l'administration.
+async function resolveEffectiveRole(employeeId: string | undefined, claimedRole: string | undefined): Promise<{ role: string | null; verified: boolean }> {
+  if (supabaseEnabled) {
+    const role = await resolveEmployeeRole(employeeId);
+    return { role, verified: true };
+  }
+  return { role: claimedRole || null, verified: false };
+}
 
 const EXPENSE_CATEGORIES = ['materials', 'tools', 'fuel', 'rental', 'subcontractor', 'admin', 'other'] as const;
 
@@ -48,18 +65,26 @@ function buildEngineerSystemInstruction(regionLabel: string | undefined, country
   `;
 }
 
-// Prompt de l'IA Comptable/Secrétaire : gestion complète de l'entreprise (accès
-// réservé à l'administration — vérifié côté serveur, pas seulement côté client).
+// Prompt de l'IA Gestionnaire (Comptable/Secrétaire) : gestion complète de l'entreprise —
+// comptabilité, gestion de matériel/inventaire, gestion des payes et administration de
+// l'application (accès réservé à l'administration — vérifié côté serveur, pas seulement
+// côté client).
 function buildAccountantSystemInstruction(regionLabel: string | undefined, companyName: string | undefined): string {
   const location = regionLabel && regionLabel.trim() ? regionLabel.trim() : 'Amérique du Nord';
   const name = companyName && companyName.trim() ? companyName.trim() : 'l\'entreprise';
   return `
-    Tu es "l'IA Comptable/Secrétaire" de ${name}, une entreprise de pose de toiture et parement extérieur basée en ${location}.
-    Tu es accessible UNIQUEMENT à l'administration/au propriétaire.
+    Tu es "l'IA Gestionnaire" (Comptable/Secrétaire) de ${name}, une entreprise de pose de toiture et parement extérieur basée en ${location}.
+    Tu es accessible UNIQUEMENT à l'administration/au propriétaire — jamais aux employés de chantier.
 
-    Ton rôle : agir comme comptable et secrétaire de l'entreprise — aider à catégoriser les dépenses,
-    analyser les entrées d'argent et la rentabilité des chantiers, rédiger des bons de commande et
-    de la correspondance, et donner des conseils de gestion administrative.
+    Ton rôle couvre l'ensemble de la gestion de l'entreprise :
+    - Comptabilité : catégoriser les dépenses, analyser les entrées d'argent et la rentabilité des chantiers,
+      rédiger des bons de commande et de la correspondance.
+    - Gestion de matériel/inventaire : aider à planifier les commandes de matériaux, repérer les seuils
+      critiques, comparer les fournisseurs et optimiser les achats.
+    - Gestion des payes : aider à calculer les heures, les taux, les vacances, les retenues et charges
+      sociales applicables, et à préparer les payes — toujours en te basant sur les règles de ${location}.
+    - Gestion de l'application : conseiller sur la configuration de l'entreprise, des employés, des rôles
+      et des réglages de l'application de gestion de chantier.
     Base tes réponses de conformité, de charges sociales et de taxes sur les règles applicables en ${location} —
     ne présume jamais que l'entreprise est au Québec à moins que ce soit précisé.
     Rappelle, si la question porte sur une obligation fiscale ou légale précise, qu'un comptable ou
@@ -193,6 +218,24 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const VISION_CAPABLE_PROVIDERS = new Set(['gemini', 'anthropic', 'openai']);
 
+// Détecte le fournisseur à partir du format de la clé API elle-même. Sert de filet de
+// sécurité quand le fournisseur choisi dans les Réglages ne correspond pas à la clé
+// réellement collée (ex: une clé Anthropic collée alors que le fournisseur sélectionné
+// est resté sur sa valeur par défaut) — évite de renvoyer une erreur d'authentification
+// cryptique du mauvais fournisseur alors qu'une clé valide a bel et bien été fournie.
+function detectProviderFromKey(apiKey: string): string | null {
+  const key = apiKey.trim();
+  if (key.startsWith('sk-ant-')) return 'anthropic';
+  if (key.startsWith('AIza')) return 'gemini';
+  if (key.startsWith('sk-proj-') || key.startsWith('sk-svcacct-')) return 'openai';
+  return null;
+}
+
+function resolveProviderForKey(requestedProvider: string, apiKey: string): string {
+  const detected = detectProviderFromKey(apiKey);
+  return detected && detected !== requestedProvider ? detected : requestedProvider;
+}
+
 async function callProvider(selectedProvider: string, message: string, apiKey: string, systemInstruction: string, image?: ImageInput): Promise<string> {
   if (selectedProvider === 'anthropic') return callAnthropic(message, apiKey, systemInstruction, image);
   if (selectedProvider === 'openai') return callOpenAI(message, apiKey, systemInstruction, image);
@@ -218,20 +261,32 @@ export function registerApiRoutes(app: express.Express): void {
   // via l'employeeId — jamais en se fiant uniquement à ce que le client prétend.
   app.post('/api/chat', async (req, res) => {
     try {
-      const { message, provider, apiKey: clientApiKey, regionLabel, country, companyName, mode, employeeId } = req.body;
+      const { message, provider, apiKey: clientApiKey, regionLabel, country, companyName, mode, employeeId, employeeRole } = req.body;
       const requestedMode: AiMode = mode === 'accountant' ? 'accountant' : 'engineer';
 
       let effectiveMode: AiMode = requestedMode;
+      let deniedReason: string | null = null;
       if (requestedMode === 'accountant') {
-        const role = await resolveEmployeeRole(employeeId);
+        const { role, verified } = await resolveEffectiveRole(employeeId, employeeRole);
         if (!role || !FINANCIAL_ACCESS_ROLES.has(role)) {
-          // Rétrograde silencieusement vers l'IA Ingénieur plutôt que de renvoyer
-          // les chiffres de l'entreprise à quelqu'un qui n'y a pas droit.
+          // Rétrograde vers l'IA Ingénieur plutôt que de renvoyer les chiffres de
+          // l'entreprise à quelqu'un qui n'y a pas droit, mais explique pourquoi
+          // (au lieu de rétrograder silencieusement, ce qui donnait l'impression
+          // que "l'IA ne fonctionne pas" à un administrateur légitime).
           effectiveMode = 'engineer';
+          deniedReason = verified
+            ? "Accès à l'IA Gestionnaire réservé à l'administration/comptabilité/secrétariat."
+            : "Impossible de vérifier votre rôle (sélectionnez votre profil employé avant d'utiliser l'IA Gestionnaire).";
         }
       }
 
-      const selectedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'gemini';
+      // Le fournisseur par défaut est Anthropic Claude ; on corrige aussi automatiquement
+      // le fournisseur si la clé fournie ne correspond manifestement pas à celui sélectionné
+      // (ex: clé Anthropic collée alors que le fournisseur est resté sur sa valeur par défaut).
+      const requestedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'anthropic';
+      const selectedProvider: string = (clientApiKey && clientApiKey.trim())
+        ? resolveProviderForKey(requestedProvider, clientApiKey)
+        : requestedProvider;
       const envKey = process.env[PROVIDER_ENV_KEYS[selectedProvider]];
       const apiKey = (clientApiKey && clientApiKey.trim()) || envKey;
       const systemInstruction = effectiveMode === 'accountant'
@@ -242,12 +297,13 @@ export function registerApiRoutes(app: express.Express): void {
         return res.json({
           reply: `🤖 L'assistant IA fonctionne en mode simulation locale car aucune clé API n'est configurée pour ${PROVIDER_LABELS[selectedProvider]}. Ajoutez votre clé API dans Réglages > Assistant IA pour l'activer.`,
           simulated: true,
-          mode: effectiveMode
+          mode: effectiveMode,
+          deniedReason
         });
       }
 
       const text = await callProvider(selectedProvider, message, apiKey, systemInstruction);
-      return res.json({ reply: text, mode: effectiveMode });
+      return res.json({ reply: text, mode: effectiveMode, provider: selectedProvider, deniedReason });
     } catch (error: any) {
       console.error('Error on /api/chat:', error);
       return res.status(500).json({ error: error.message || 'Error occurred while calling the AI provider' });
@@ -259,8 +315,8 @@ export function registerApiRoutes(app: express.Express): void {
   // vérifié côté serveur comme pour /api/chat.
   app.post('/api/receipts/scan', async (req, res) => {
     try {
-      const { imageBase64, mimeType, provider, apiKey: clientApiKey, employeeId } = req.body;
-      const role = await resolveEmployeeRole(employeeId);
+      const { imageBase64, mimeType, provider, apiKey: clientApiKey, employeeId, employeeRole } = req.body;
+      const { role } = await resolveEffectiveRole(employeeId, employeeRole);
       if (!role || !FINANCIAL_ACCESS_ROLES.has(role)) {
         return res.status(403).json({ error: "Accès réservé à l'administration." });
       }
@@ -268,7 +324,10 @@ export function registerApiRoutes(app: express.Express): void {
         return res.status(400).json({ error: 'Image manquante' });
       }
 
-      const selectedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'gemini';
+      const requestedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'anthropic';
+      const selectedProvider: string = (clientApiKey && clientApiKey.trim())
+        ? resolveProviderForKey(requestedProvider, clientApiKey)
+        : requestedProvider;
       if (!VISION_CAPABLE_PROVIDERS.has(selectedProvider)) {
         return res.status(400).json({ error: `${PROVIDER_LABELS[selectedProvider]} ne supporte pas l'analyse de photo. Choisissez Gemini, Anthropic ou OpenAI pour scanner une facture.` });
       }

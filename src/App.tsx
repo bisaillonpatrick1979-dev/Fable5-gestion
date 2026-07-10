@@ -582,20 +582,24 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userText,
-          provider: companyInfo.aiProvider || 'gemini',
+          provider: companyInfo.aiProvider || 'anthropic',
           apiKey: companyInfo.aiApiKey || '',
           regionLabel: `${companyRegion.nameFR} (${companyCountry === 'US' ? 'États-Unis' : 'Canada'})`,
           country: companyCountry,
           companyName: companyInfo.name,
           mode: aiMode,
-          employeeId: activeEmployee?.id
+          employeeId: activeEmployee?.id,
+          employeeRole: activeEmployee?.role
         })
       });
       const data = await res.json();
+      const replyText = res.ok
+        ? (data.deniedReason ? `⚠️ ${data.deniedReason}\n\n${data.reply}` : data.reply)
+        : (data.error || "Désolé, l'agent IA a rencontré une erreur. Veuillez réessayer.");
 
       setAiHistory(prev => [...prev, {
         role: 'assistant',
-        text: res.ok ? data.reply : (data.error || "Désolé, l'agent IA a rencontré une erreur. Veuillez réessayer."),
+        text: replyText,
         simulated: data.simulated
       }]);
     } catch (err: any) {
@@ -632,9 +636,10 @@ export default function App() {
         body: JSON.stringify({
           imageBase64: base64,
           mimeType: file.type || 'image/jpeg',
-          provider: companyInfo.aiProvider || 'gemini',
+          provider: companyInfo.aiProvider || 'anthropic',
           apiKey: companyInfo.aiApiKey || '',
-          employeeId: activeEmployee.id
+          employeeId: activeEmployee.id,
+          employeeRole: activeEmployee.role
         })
       });
       const data = await res.json();
@@ -5771,7 +5776,7 @@ export default function App() {
                                 key={p.id}
                                 onClick={() => updateCompanyInfo({ aiProvider: p.id })}
                                 className={`p-3 rounded-xl border text-xs font-black transition cursor-pointer ${
-                                  (companyInfo.aiProvider || 'gemini') === p.id
+                                  (companyInfo.aiProvider || 'anthropic') === p.id
                                     ? 'bg-orange-600 border-orange-500 text-white'
                                     : 'bg-gray-900 border-gray-800 text-gray-300 hover:border-gray-700'
                                 }`}
@@ -5802,7 +5807,10 @@ export default function App() {
                           </div>
                           <button
                             onClick={() => {
-                              updateCompanyInfo({ aiApiKey: aiKeyDraft });
+                              // Enregistre toujours la clé ET le fournisseur actuellement sélectionné
+                              // ensemble (même si le fournisseur n'a jamais été explicitement cliqué)
+                              // pour éviter qu'une clé soit envoyée avec le mauvais fournisseur par défaut.
+                              updateCompanyInfo({ aiApiKey: aiKeyDraft, aiProvider: companyInfo.aiProvider || 'anthropic' });
                               alert('Clé API enregistrée !');
                             }}
                             className="w-full py-2 bg-orange-600 hover:bg-orange-500 text-white font-black text-xs rounded-xl transition cursor-pointer"
@@ -5811,7 +5819,7 @@ export default function App() {
                           </button>
                           <p className="text-[10px] text-gray-500">
                             {companyInfo.aiApiKey
-                              ? `Clé actuellement enregistrée pour ${AI_PROVIDER_LABELS_FR[companyInfo.aiProvider || 'gemini']} (••••${companyInfo.aiApiKey.slice(-4)}).`
+                              ? `Clé actuellement enregistrée pour ${AI_PROVIDER_LABELS_FR[companyInfo.aiProvider || 'anthropic']} (••••${companyInfo.aiApiKey.slice(-4)}).`
                               : "Aucune clé enregistrée : l'assistant répond en mode simulation locale."}
                           </p>
                           <p className="text-[10px] text-gray-500">

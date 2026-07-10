@@ -11,8 +11,14 @@ import { registerApiRoutes } from './apiRoutes';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// En dev (npm run dev via tsx), ce fichier tourne en ESM : import.meta.url est disponible
+// et __dirname ne l'est pas. En production, esbuild bundle ce fichier en CommonJS
+// (dist/server.cjs) : Node fournit alors nativement __dirname, mais import.meta.url est vidé
+// par esbuild (voir avertissement de build) — l'appeler inconditionnellement fait planter le
+// serveur au démarrage. On détecte donc le format à l'exécution plutôt que de supposer l'un ou l'autre.
+const currentDir = typeof __dirname !== 'undefined'
+  ? __dirname
+  : path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const app = express();
@@ -53,10 +59,12 @@ async function startServer() {
       }
     });
   } else {
-    // Serve static files in production
-    app.use(express.static(path.join(__dirname, 'dist')));
+    // Serve static files in production. Le bundle esbuild (dist/server.cjs) vit dans le
+    // même dossier dist/ que les fichiers générés par Vite (dist/index.html, dist/assets/...)
+    // — currentDir EST déjà ce dossier dist/, pas besoin d'y ajouter 'dist' à nouveau.
+    app.use(express.static(currentDir));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist/index.html'));
+      res.sendFile(path.join(currentDir, 'index.html'));
     });
   }
 

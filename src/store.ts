@@ -317,7 +317,8 @@ const initialCompanyInfo: CompanyInfo = {
   legalMinimumWage: 15.75, // minimum québécois
   voiceReminderVolume: 80,
   voiceReminderSchedule: '08:00, 12:00, 17:00',
-  paymentTerms: 'Paiement net 30 jours'
+  paymentTerms: 'Paiement net 30 jours',
+  aiProvider: 'anthropic'
 };
 
 const initialHRAlerts: HRAlert[] = [
