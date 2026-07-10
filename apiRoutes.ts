@@ -4,7 +4,7 @@
 // n'importe quelle instance Express sans dupliquer la logique.
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { supabase, supabaseEnabled, resolveCompanyId, resolveEmployeeRole, TABLES_WITH_COMPANY_ID, TABLE_ID_COLUMN } from './db';
+import { supabase, supabaseEnabled, supabaseInitError, resolveCompanyId, resolveEmployeeRole, TABLES_WITH_COMPANY_ID, TABLE_ID_COLUMN } from './db';
 
 // Toutes les tables exposées par la couche de données générique (voir supabase_migration.sql)
 const KNOWN_TABLES = [
@@ -265,6 +265,7 @@ export function registerApiRoutes(app: express.Express): void {
       ok: true,
       timestamp: new Date().toISOString(),
       supabaseConfigured: supabaseEnabled,
+      supabaseInitError,
       serverKeys: {
         anthropic: !!process.env.ANTHROPIC_API_KEY,
         gemini: !!process.env.GEMINI_API_KEY,

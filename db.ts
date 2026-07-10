@@ -4,14 +4,37 @@
 import 'dotenv/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Nettoie une variable d'environnement collée à la main : espaces parasites et
+// guillemets englobants (fréquents quand on copie la valeur depuis un .env où
+// elle est écrite VAR="valeur"). Des guillemets laissés dans SUPABASE_URL font
+// planter createClient à l'import du module — ce qui, en serverless (Vercel),
+// fait crasher TOUTES les routes /api/* avec FUNCTION_INVOCATION_FAILED.
+function cleanEnv(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value.trim().replace(/^["']|["']$/g, '').trim();
+  return cleaned || undefined;
+}
 
-export const supabaseEnabled = !!(supabaseUrl && supabaseServiceKey);
+const supabaseUrl = cleanEnv(process.env.SUPABASE_URL);
+const supabaseServiceKey = cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-export const supabase: SupabaseClient | null = supabaseEnabled
-  ? createClient(supabaseUrl as string, supabaseServiceKey as string, { auth: { persistSession: false } })
-  : null;
+// Si l'initialisation échoue malgré le nettoyage (URL invalide, valeur placeholder…),
+// on désactive Supabase au lieu de laisser l'exception tuer la fonction serverless :
+// l'application retombe en mode LocalStorage et /api/health expose l'erreur.
+let supabaseClient: SupabaseClient | null = null;
+let initError: string | null = null;
+if (supabaseUrl && supabaseServiceKey) {
+  try {
+    supabaseClient = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
+  } catch (e: any) {
+    initError = e?.message || String(e);
+    console.error('Supabase init failed (app continues in LocalStorage mode):', initError);
+  }
+}
+
+export const supabase: SupabaseClient | null = supabaseClient;
+export const supabaseEnabled = !!supabaseClient;
+export const supabaseInitError = initError;
 
 // Tables portant une colonne company_id (entreprise mono-tenant : une seule ligne dans "companies")
 export const TABLES_WITH_COMPANY_ID = new Set([
