@@ -1,6 +1,5 @@
 {
-  "name": "Gestion Chantier Pro",
-  "description": "Application mobile-first de gestion de chantier pour Votre Entreprise - Punches, projets, géofencing, inventaire et IA.",
-  "requestFramePermissions": ["geolocation"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Fable5 Gestion",
+  "description": "Application mobile-first de gestion de chantier - Punches, projets, géofencing, inventaire, paie et IA Ingénieur/Gestionnaire multi-fournisseur (Anthropic, Gemini, OpenAI, DeepSeek).",
+  "requestFramePermissions": ["geolocation"]
 }
