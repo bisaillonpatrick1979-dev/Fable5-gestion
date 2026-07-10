@@ -7,7 +7,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { registerApiRoutes } from './apiRoutes';
+import { registerApiRoutes } from './apiRoutes.js';
 
 dotenv.config();
 

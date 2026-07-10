@@ -2,7 +2,11 @@
 // Les routes elles-mêmes vivent dans apiRoutes.ts, partagé avec server.ts (le
 // serveur Node traditionnel utilisé en développement local et hors Vercel).
 import express from 'express';
-import { registerApiRoutes } from '../apiRoutes';
+// Extension .js obligatoire : le projet est en "type": "module" et le runtime Node
+// de Vercel exécute cette fonction en ESM, où les imports relatifs sans extension
+// échouent avec ERR_MODULE_NOT_FOUND — la fonction entière crashait alors avec
+// FUNCTION_INVOCATION_FAILED avant d'exécuter la moindre route.
+import { registerApiRoutes } from '../apiRoutes.js';
 
 const app = express();
 app.use(express.json({ limit: '15mb' })); // signatures tactiles encodées en base64
