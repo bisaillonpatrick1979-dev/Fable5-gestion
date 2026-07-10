@@ -4,7 +4,8 @@
 // n'importe quelle instance Express sans dupliquer la logique.
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { supabase, supabaseEnabled, supabaseInitError, resolveCompanyId, resolveEmployeeRole, TABLES_WITH_COMPANY_ID, TABLE_ID_COLUMN } from './db';
+// Extension .js obligatoire pour l'exécution ESM sur Vercel (voir api/index.ts).
+import { supabase, supabaseEnabled, supabaseInitError, resolveCompanyId, resolveEmployeeRole, TABLES_WITH_COMPANY_ID, TABLE_ID_COLUMN } from './db.js';
 
 // Toutes les tables exposées par la couche de données générique (voir supabase_migration.sql)
 const KNOWN_TABLES = [
