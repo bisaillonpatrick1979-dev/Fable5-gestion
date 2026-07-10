@@ -592,21 +592,33 @@ export default function App() {
           employeeRole: activeEmployee?.role
         })
       });
-      const data = await res.json();
-      const replyText = res.ok
-        ? (data.deniedReason ? `⚠️ ${data.deniedReason}\n\n${data.reply}` : data.reply)
-        : (data.error || "Désolé, l'agent IA a rencontré une erreur. Veuillez réessayer.");
+      // Lit la réponse en texte d'abord : si le serveur (ou une couche devant lui,
+      // comme la protection de déploiement Vercel) renvoie une page HTML au lieu de
+      // JSON, on peut alors afficher un diagnostic précis au lieu d'un faux
+      // "erreur réseau" qui masque la vraie cause.
+      const rawBody = await res.text();
+      let data: any = null;
+      try { data = JSON.parse(rawBody); } catch { /* réponse non-JSON gérée ci-dessous */ }
+
+      let replyText: string;
+      if (data && res.ok) {
+        replyText = data.deniedReason ? `⚠️ ${data.deniedReason}\n\n${data.reply}` : data.reply;
+      } else if (data) {
+        replyText = data.error || `Le serveur a renvoyé une erreur (HTTP ${res.status}). Veuillez réessayer.`;
+      } else {
+        replyText = `⚠️ Le serveur a répondu HTTP ${res.status} avec une page non-JSON — l'appel n'a pas atteint l'API de l'application. Causes fréquentes : protection de déploiement Vercel activée (Settings > Deployment Protection), ou fonction API en erreur. Vérifiez /api/health dans le navigateur.`;
+      }
 
       setAiHistory(prev => [...prev, {
         role: 'assistant',
         text: replyText,
-        simulated: data.simulated
+        simulated: data?.simulated
       }]);
     } catch (err: any) {
       console.error(err);
       setAiHistory(prev => [...prev, {
         role: 'assistant',
-        text: "Désolé, l'agent IA a rencontré une erreur réseau. Veuillez réessayer."
+        text: `Désolé, l'agent IA a rencontré une erreur réseau (${err?.message || 'connexion impossible'}). Vérifiez votre connexion et réessayez.`
       }]);
     } finally {
       setIsAiLoading(false);
@@ -642,7 +654,13 @@ export default function App() {
           employeeRole: activeEmployee.role
         })
       });
-      const data = await res.json();
+      const rawBody = await res.text();
+      let data: any = null;
+      try { data = JSON.parse(rawBody); } catch { /* réponse non-JSON gérée ci-dessous */ }
+      if (!data) {
+        setAiHistoryAccountant(prev => [...prev, { role: 'assistant', text: `⚠️ Le serveur a répondu HTTP ${res.status} avec une page non-JSON — l'appel n'a pas atteint l'API. Vérifiez /api/health dans le navigateur.` }]);
+        return;
+      }
       if (!res.ok) {
         setAiHistoryAccountant(prev => [...prev, { role: 'assistant', text: data.error || "Erreur lors du scan de la facture." }]);
         return;

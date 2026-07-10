@@ -255,6 +255,25 @@ function requireKnownTable(table: string, res: express.Response): boolean {
 // express.json() a déjà été appliqué en middleware par l'appelant (avec une
 // limite de taille suffisante pour les photos de factures en base64).
 export function registerApiRoutes(app: express.Express): void {
+  // Diagnostic rapide depuis un navigateur : confirme que la fonction API tourne
+  // et quelles intégrations sont configurées côté serveur — sans jamais exposer
+  // les valeurs des clés. Si cette URL renvoie une page HTML au lieu de ce JSON,
+  // c'est que quelque chose (protection de déploiement, rewrite, crash) intercepte
+  // les requêtes avant qu'elles n'atteignent l'API.
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      timestamp: new Date().toISOString(),
+      supabaseConfigured: supabaseEnabled,
+      serverKeys: {
+        anthropic: !!process.env.ANTHROPIC_API_KEY,
+        gemini: !!process.env.GEMINI_API_KEY,
+        openai: !!process.env.OPENAI_API_KEY,
+        deepseek: !!process.env.DEEPSEEK_API_KEY
+      }
+    });
+  });
+
   // API Route for AI Agent chat (Gemini / Anthropic / OpenAI / DeepSeek).
   // Deux personas : 'engineer' (tous les employés, aucune donnée financière) et
   // 'accountant' (administration seulement). Le rôle est re-vérifié côté serveur
