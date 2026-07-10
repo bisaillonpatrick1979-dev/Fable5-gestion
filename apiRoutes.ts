@@ -237,6 +237,30 @@ function resolveProviderForKey(requestedProvider: string, apiKey: string): strin
   return detected && detected !== requestedProvider ? detected : requestedProvider;
 }
 
+function resolveProviderConfig(provider: unknown, clientApiKey: unknown): { selectedProvider: string; apiKey: string | undefined } {
+  const requestedProvider = typeof provider === 'string' && PROVIDER_ENV_KEYS[provider] ? provider : 'anthropic';
+  const trimmedClientKey = typeof clientApiKey === 'string' ? clientApiKey.trim() : '';
+
+  if (trimmedClientKey) {
+    const selectedProvider = resolveProviderForKey(requestedProvider, trimmedClientKey);
+    return { selectedProvider, apiKey: trimmedClientKey };
+  }
+
+  const requestedEnvKey = process.env[PROVIDER_ENV_KEYS[requestedProvider]];
+  if (requestedEnvKey && requestedEnvKey.trim()) {
+    return { selectedProvider: requestedProvider, apiKey: requestedEnvKey };
+  }
+
+  // Production has Anthropic configured server-side. If the browser still has another
+  // provider selected but no key for it, use Anthropic instead of falling back to demo mode.
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (requestedProvider !== 'anthropic' && anthropicKey && anthropicKey.trim()) {
+    return { selectedProvider: 'anthropic', apiKey: anthropicKey };
+  }
+
+  return { selectedProvider: requestedProvider, apiKey: requestedEnvKey };
+}
+
 async function callProvider(selectedProvider: string, message: string, apiKey: string, systemInstruction: string, image?: ImageInput): Promise<string> {
   if (selectedProvider === 'anthropic') return callAnthropic(message, apiKey, systemInstruction, image);
   if (selectedProvider === 'openai') return callOpenAI(message, apiKey, systemInstruction, image);
@@ -303,13 +327,9 @@ export function registerApiRoutes(app: express.Express): void {
 
       // Le fournisseur par défaut est Anthropic Claude ; on corrige aussi automatiquement
       // le fournisseur si la clé fournie ne correspond manifestement pas à celui sélectionné
-      // (ex: clé Anthropic collée alors que le fournisseur est resté sur sa valeur par défaut).
-      const requestedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'anthropic';
-      const selectedProvider: string = (clientApiKey && clientApiKey.trim())
-        ? resolveProviderForKey(requestedProvider, clientApiKey)
-        : requestedProvider;
-      const envKey = process.env[PROVIDER_ENV_KEYS[selectedProvider]];
-      const apiKey = (clientApiKey && clientApiKey.trim()) || envKey;
+      // et on retombe sur la clé Anthropic serveur quand aucun autre fournisseur configuré
+      // côté navigateur ne possède de clé côté serveur.
+      const { selectedProvider, apiKey } = resolveProviderConfig(provider, clientApiKey);
       const systemInstruction = effectiveMode === 'accountant'
         ? buildAccountantSystemInstruction(regionLabel, companyName)
         : buildEngineerSystemInstruction(regionLabel, country === 'US' ? 'US' : 'CA');
@@ -345,15 +365,10 @@ export function registerApiRoutes(app: express.Express): void {
         return res.status(400).json({ error: 'Image manquante' });
       }
 
-      const requestedProvider: string = provider && PROVIDER_ENV_KEYS[provider] ? provider : 'anthropic';
-      const selectedProvider: string = (clientApiKey && clientApiKey.trim())
-        ? resolveProviderForKey(requestedProvider, clientApiKey)
-        : requestedProvider;
+      const { selectedProvider, apiKey } = resolveProviderConfig(provider, clientApiKey);
       if (!VISION_CAPABLE_PROVIDERS.has(selectedProvider)) {
         return res.status(400).json({ error: `${PROVIDER_LABELS[selectedProvider]} ne supporte pas l'analyse de photo. Choisissez Gemini, Anthropic ou OpenAI pour scanner une facture.` });
       }
-      const envKey = process.env[PROVIDER_ENV_KEYS[selectedProvider]];
-      const apiKey = (clientApiKey && clientApiKey.trim()) || envKey;
       if (!apiKey || apiKey.trim() === '') {
         return res.status(400).json({ error: 'Aucune clé API configurée pour scanner une facture.' });
       }
